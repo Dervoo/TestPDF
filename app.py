@@ -1,4 +1,5 @@
 import streamlit as st
+import plotly.graph_objects as go
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -7,9 +8,8 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 def _risk_from_inputs(tenure_months: int, qa_score: float, overtime_hours: int, satisfaction: int) -> dict:
     """
-    Prosta logika (PoC): przelicza wejścia na ryzyko odejścia w skali 0-100%.
+    Logika PoC: przelicza wejścia na ryzyko odejścia w skali 0-100%.
     """
-    # Sygnały ryzyka (0..1). Wagi są dobrane heurystycznie pod PM-owskie decyzje.
     # Staż: ryzyko jest najwyższe na początku (okno ~0-6 miesięcy).
     tenure_factor = _clamp((6 - tenure_months) / 6, 0, 1)
     # QA: niższy wynik zwiększa ryzyko.
@@ -34,114 +34,124 @@ def _risk_from_inputs(tenure_months: int, qa_score: float, overtime_hours: int, 
     risk_percent = int(round(risk_unit * 100))
     risk_percent = int(_clamp(risk_percent, 0, 100))
 
-    if risk_percent >= 66:
-        color = "czerwony"
-        label = "WYSOKIE RYZYKO (Czerwona rekomendacja)"
-        recommendation = (
-            "Natychmiastowa interwencja: 1:1 rozmowa + plan doszkalania (QA) + korekta obciążenia "
-            "(nadgodziny/grafik) + wsparcie w onboarding'u. Ustal konkretne cele na 14 dni."
-        )
-        severity = "error"
-    elif risk_percent >= 33:
-        color = "zolty"
-        label = "SREDNIE RYZYKO (Zolta rekomendacja)"
-        recommendation = (
-            "Interwencja w krótkim czasie: rozmowa do 7 dni + mentoring + kontrola trendu QA "
-            "i satysfakcji. Zmniejsz przeciążenie, zanim ryzyko przejdzie w czerwone."
-        )
-        severity = "warning"
-    else:
-        color = "zielony"
-        label = "NISKIE RYZYKO (Zielona rekomendacja)"
-        recommendation = (
-            "Rutynowy follow-up: standardowy coaching i monitoring. Utrzymuj stabilność grafiku oraz "
-            "jakosc pracy (QA), zeby ryzyko nie roslo w kolejnych tygodniach."
-        )
-        severity = "success"
-
-    # Sygnały do wyjaśnienia wyniku (Top-2).
-    components = {
-        "staz (wczesny onboarding)": tenure_factor,
-        "QA (%)": qa_factor,
-        "nadgodziny/mies.": overtime_factor,
-        "satysfakcja (1-10)": satisfaction_factor,
-    }
-    top2 = sorted(components.items(), key=lambda kv: kv[1], reverse=True)[:2]
-
     return {
         "risk_percent": risk_percent,
-        "label": label,
-        "color": color,
-        "recommendation": recommendation,
-        "severity": severity,
-        "top_signals": top2,
         "factors": {
-            "tenure_factor": tenure_factor,
-            "qa_factor": qa_factor,
-            "overtime_factor": overtime_factor,
-            "satisfaction_factor": satisfaction_factor,
+            "tenure": tenure_factor,
+            "qa": qa_factor,
+            "overtime": overtime_factor,
+            "satisfaction": satisfaction_factor,
         },
     }
 
 
 def main() -> None:
-    st.set_page_config(page_title="CCIG Employee Churn Predictor", layout="centered")
-    st.title("CCIG Employee Churn Predictor")
-    st.caption("Prototyp (PoC): prosta logika ryzyka dla PM-a. Do produkcji potrzebny model walidowany na danych.")
-
-    st.subheader("Wejścia (suwaki)")
-    tenure_months = st.slider("Staz pracy (miesiace)", min_value=0, max_value=36, value=6, step=1)
-    qa_score = st.slider("Wynik QA (%)", min_value=0, max_value=100, value=75, step=1)
-    overtime_hours = st.slider(
-        "Liczba nadgodzin w miesiacu",
-        min_value=0,
-        max_value=60,
-        value=5,
-        step=1,
-    )
-    satisfaction = st.slider(
-        "Wynik satysfakcji pracownika (1-10)",
-        min_value=1,
-        max_value=10,
-        value=7,
-        step=1,
+    st.set_page_config(
+        page_title="CCIG Employee Churn Predictor",
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
 
-    st.subheader("Ocena ryzyka i rekomendacja PM")
+    st.title("🚀 CCIG Employee Churn Predictor")
+    st.markdown("---")
 
-    result = _risk_from_inputs(
-        tenure_months=tenure_months,
-        qa_score=float(qa_score),
-        overtime_hours=int(overtime_hours),
-        satisfaction=int(satisfaction),
-    )
+    # Layout: Lewa kolumna (Wejścia), Prawa kolumna (Analiza i Rekomendacje)
+    col_input, col_output = st.columns([1, 1.2], gap="large")
 
+    with col_input:
+        st.subheader("📊 Parametry Agenta")
+        st.info("Dostosuj suwaki, aby przeanalizować ryzyko odejścia pracownika.")
+        
+        tenure_months = st.slider("Staż pracy (miesiące)", 0, 36, 6)
+        qa_score = st.slider("Wynik QA (%)", 0, 100, 75)
+        overtime_hours = st.slider("Nadgodziny w miesiącu", 0, 60, 5)
+        satisfaction = st.slider("Wynik satysfakcji (1-10)", 1, 10, 7)
+
+        st.markdown("---")
+        with st.expander("ℹ️ Metodologia"):
+            st.write(
+                "Algorytm analizuje 4 kluczowe wymiary: Onboarding (Staż), "
+                "Efektywność (QA), Obciążenie (Overtime) oraz Morale (Satysfakcja)."
+            )
+
+    # Obliczenia
+    result = _risk_from_inputs(tenure_months, float(qa_score), overtime_hours, satisfaction)
     risk_percent = result["risk_percent"]
-    label = result["label"]
-    recommendation = result["recommendation"]
-    top_signals = result["top_signals"]
+    factors = result["factors"]
 
-    if result["severity"] == "error":
-        st.error(f"{label}: {risk_percent}%")
-    elif result["severity"] == "warning":
-        st.warning(f"{label}: {risk_percent}%")
-    else:
-        st.success(f"{label}: {risk_percent}%")
+    with col_output:
+        st.subheader("🔍 Wynik Analizy Ryzyka")
 
-    st.write("Rekomendacja dla PM-a:")
-    st.write(recommendation)
+        # 1. Gauge Chart (Wykres zegarowy)
+        fig = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=risk_percent,
+            title={'text': "Prawdopodobieństwo Churnu (%)", 'font': {'size': 20}},
+            domain={'x': [0, 1], 'y': [0, 1]},
+            gauge={
+                'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
+                'bar': {'color': "#31333F"},
+                'bgcolor': "white",
+                'borderwidth': 2,
+                'bordercolor': "gray",
+                'steps': [
+                    {'range': [0, 33], 'color': '#28a745'},  # Zielony
+                    {'range': [33, 66], 'color': '#ffc107'}, # Żółty
+                    {'range': [66, 100], 'color': '#dc3545'} # Czerwony
+                ],
+                'threshold': {
+                    'line': {'color': "black", 'width': 4},
+                    'thickness': 0.75,
+                    'value': risk_percent
+                }
+            }
+        ))
+        fig.update_layout(height=350, margin=dict(l=20, r=20, t=50, b=20))
+        st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("Najmocniejsze sygnaly w tym scenariuszu:")
-    sig_text = ", ".join([f"{name} ({value:.2f})" for name, value in top_signals])
-    st.info(sig_text)
-
-    with st.expander("Jak dziala uproszczony scoring (dla komisji)"):
-        st.write(
-            "Model liczy ryzyko jako wazona sume czterech sygnalow (staz, QA, nadgodziny, satysfakcje). "
-            "Nastepnie przypina wynik do progu kolorow: zielony <33%, zolty 33-65%, czerwony >=66%."
+        # 2. Kalkulator Ryzyka Finansowego
+        base_cost = 6000
+        # Logika: Przy wysokim ryzyku (>66%) koszt jest prezentowany jako niemal pewna strata
+        if risk_percent > 66:
+            at_risk_capital = base_cost
+        else:
+            at_risk_capital = (risk_percent / 100.0) * base_cost
+        
+        st.metric(
+            label="⚠️ Zagrożony Kapitał (Koszty Rotacji)", 
+            value=f"{at_risk_capital:,.2f} PLN",
+            delta=f"przy koszcie bazowym {base_cost} PLN",
+            delta_color="inverse"
         )
+
+        st.markdown("---")
+
+        # 3. Dynamiczne "Action Plan" (Rekomendacje)
+        st.subheader("📝 Plan Działania dla PM-a")
+        
+        recommendations = []
+        
+        if satisfaction <= 3:
+            recommendations.append("🚨 **Krytyczne!** Przeprowadź spotkanie 1:1 w ciągu najbliższych 24h. Wynik satysfakcji jest alarmująco niski.")
+        
+        if overtime_hours > 20:
+            recommendations.append("📉 **Przeciążenie:** Zredukuj obciążenie w grafiku. Ryzyko wypalenia z powodu nadmiernej liczby nadgodzin.")
+        
+        if qa_score < 60:
+            recommendations.append("🎓 **Rozwój:** Zaplanuj sesję kalibracyjną i odsłuchy z trenerem. Spadek jakości rzutuje na pewność siebie agenta.")
+            
+        if tenure_months <= 3 and risk_percent > 50:
+            recommendations.append("🐣 **Onboarding:** Zintensyfikuj opiekę mentorską. Agent jest w fazie 'szoku po-szkoleniowego'.")
+
+        if not recommendations:
+            if risk_percent < 20:
+                st.success("Wszystkie wskaźniki w normie. Rekomendacja: Standardowy feedback motywacyjny.")
+            else:
+                st.info("Monitoruj sytuację. Brak krytycznych odchyleń, ale wskaźnik ryzyka jest podwyższony.")
+        else:
+            for rec in recommendations:
+                st.write(rec)
 
 
 if __name__ == "__main__":
     main()
-
